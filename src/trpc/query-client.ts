@@ -1,6 +1,6 @@
 import {
   defaultShouldDehydrateQuery,
-  QueryClient,
+  QueryClient, //The manager responsible for React Query's server data.
 } from '@tanstack/react-query';
 //import superjson from 'superjson';
 export function makeQueryClient() {

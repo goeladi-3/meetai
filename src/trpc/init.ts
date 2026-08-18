@@ -1,6 +1,7 @@
 import { initTRPC } from '@trpc/server';
 import { cache } from 'react';
 export const createTRPCContext = cache(async () => {
+  //Information that should be available to tRPC procedures while they execute.
   /**
    * @see: https://trpc.io/docs/server/context
    */
@@ -11,6 +12,7 @@ export const createTRPCContext = cache(async () => {
 // For instance, the use of a t variable
 // is common in i18n libraries.
 const t = initTRPC.create({
+  //Establishing the tRPC environment from which routers and procedures will be created.
   /**
    * @see https://trpc.io/docs/server/data-transformers
    */
