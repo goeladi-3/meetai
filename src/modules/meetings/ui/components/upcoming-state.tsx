@@ -19,7 +19,7 @@ export const UpcomingState = ({
         description="Once you start this meeting, a summary will appear here"
       />
       <div className="flex flex-col-reverse lg:flex-row lg:justify-center items-center gap-2 w-full">
-        <Button render={<Link href={`/call/${meetingId}`}/>} className="w-full lg:w-auto">
+        <Button nativeButton={false} render={<Link href={`/call/${meetingId}`}/>} className="w-full lg:w-auto">
             <VideoIcon />
             Start meeting
         </Button>
