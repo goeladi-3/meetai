@@ -11,7 +11,7 @@ export const CallEnded = () => {
             <h6 className="text-lg font-medium">You have ended the call</h6>
             <p className="text-sm">Summary will appear in a few minutes.</p>
           </div>
-          <Button render={<Link href="/meetings" />}>
+          <Button nativeButton={false} render={<Link href="/meetings" />}>
             Back to meetings
           </Button>
         </div>

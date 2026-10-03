@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { StreamTheme, useCall } from "@stream-io/video-react-sdk";
+import { toast } from "sonner";
 
+import { REALTIME_AGENT_ENABLED } from "@/constants";
 import { CallLobby } from "./call-lobby";
 import { CallActive } from "./call-active";
 import { CallEnded } from "./call-ended";
@@ -17,6 +19,14 @@ export const CallUI = ({ meetingName }: Props) => {
     if (!call) return;
     await call.join();
     setShow("call");
+
+    if (!REALTIME_AGENT_ENABLED) {
+      toast.info("Live AI assistant is unavailable right now", {
+        description:
+          "Your meeting will still be recorded, transcribed and summarized.",
+        duration: 6000,
+      });
+    }
   };
 
   const handleLeave = () => {
