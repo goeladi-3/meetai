@@ -1,5 +1,5 @@
 import { and, eq, not } from "drizzle-orm";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import {
   MessageNewEvent,
   CallEndedEvent,
@@ -17,6 +17,7 @@ import { inngest } from "@/inngest/client";
 import { generateAvatarUri } from "@/lib/avatar";
 import { streamChat } from "@/lib/stream-chat";
 import { REALTIME_AGENT_ENABLED } from "@/constants";
+export const maxDuration = 30;
 
 const gemini = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY!,
@@ -219,16 +220,15 @@ export async function POST(req: NextRequest) {
       .where(eq(meetings.id, meetingId));
   }
 
-  else if (eventType === "message.new") {
+   else if (eventType === "message.new") {
     const event = payload as MessageNewEvent;
 
     const userId = event.user?.id;
     const channelId = event.channel_id;
     const text = event.message?.text;
-    console.log("Stream message.new webhook received");
-console.log("Incoming message:", text);
+    const messageId = event.message?.id;
 
-    if (!userId || !channelId || !text) {
+    if (!userId || !channelId || !text || !messageId) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
@@ -253,90 +253,84 @@ console.log("Incoming message:", text);
       return NextResponse.json({ error: "Agent not found" }, { status: 404 });
     }
 
-    if (userId !== existingAgent.id) {
-      const instructions = `
+    if (userId === existingAgent.id) {
+      return NextResponse.json({ status: "ok" });
+    }
+
+    // Respond to Stream immediately; do the slow work after the response is sent.
+    after(async () => {
+      try {
+        const instructions = `
       You are an AI assistant helping the user revisit a recently completed meeting.
       Below is a summary of the meeting, generated from the transcript:
-      
+
       ${existingMeeting.summary}
-      
+
       The following are your original instructions from the live meeting assistant. Please continue to follow these behavioral guidelines as you assist the user:
-      
+
       ${existingAgent.instructions}
-      
+
       The user may ask questions about the meeting, request clarifications, or ask for follow-up actions.
       Always base your responses on the meeting summary above.
-      
+
       You also have access to the recent conversation history between you and the user. Use the context of previous messages to provide relevant, coherent, and helpful responses. If the user's question refers to something discussed earlier, make sure to take that into account and maintain continuity in the conversation.
-      
+
       If the summary does not contain enough information to answer a question, politely let the user know.
-      
+
       Be concise, helpful, and focus on providing accurate information from the meeting and the ongoing conversation.
       `;
 
-      const channel = streamChat.channel("messaging", channelId);
-      await channel.watch();
+        const channel = streamChat.channel("messaging", channelId);
+        await channel.watch();
 
-      
-      const previousMessages = channel.state.messages
-        .slice(-5)
-        .filter(
-          (msg) =>
-            msg.id !== event.message.id &&
-            msg.text &&
-            msg.text.trim() !== ""
-        )
-        .map((message) => ({
-          role:
-            message.user?.id === existingAgent.id
-              ? ("model" as const)
-              : ("user" as const),
-          parts: [{ text: message.text! }],
-        }));
+        const previousMessages = channel.state.messages
+          .slice(-5)
+          .filter(
+            (msg) => msg.id !== messageId && msg.text && msg.text.trim() !== ""
+          )
+          .map((message) => ({
+            role:
+              message.user?.id === existingAgent.id
+                ? ("model" as const)
+                : ("user" as const),
+            parts: [{ text: message.text! }],
+          }));
 
-      const response = await gemini.models.generateContent({
-        model: "gemini-3.5-flash-lite",
-        contents: [
-          ...previousMessages,
-          {
-            role: "user",
-            parts: [{ text }],
-          },
-        ],
-        config: {
-          systemInstruction: instructions,
-        },
-      });
+        const response = await gemini.models.generateContent({
+          model: "gemini-3.5-flash-lite",
+          contents: [...previousMessages, { role: "user", parts: [{ text }] }],
+          config: { systemInstruction: instructions },
+        });
 
-      const GPTResponseText = response.text;
+        const replyText = response.text;
+        if (!replyText) {
+          console.error("[webhook] No response from Gemini");
+          return;
+        }
 
-      if (!GPTResponseText) {
-        return NextResponse.json(
-          { error: "No response from Gemini" },
-          { status: 500 }
-        );
-      }
+        const avatarUrl = generateAvatarUri({
+          seed: existingAgent.name,
+          variant: "botttsNeutral",
+        });
 
-      const avatarUrl = generateAvatarUri({
-        seed: existingAgent.name,
-        variant: "botttsNeutral",
-      });
-
-      streamChat.upsertUser({
-        id: existingAgent.id,
-        name: existingAgent.name,
-        image: avatarUrl,
-      });
-
-      channel.sendMessage({
-        text: GPTResponseText,
-        user: {
+        await streamChat.upsertUser({
           id: existingAgent.id,
           name: existingAgent.name,
           image: avatarUrl,
-        },
-      });
-    }
+        });
+
+        await channel.sendMessage({
+          text: replyText,
+          user: {
+            id: existingAgent.id,
+            name: existingAgent.name,
+            image: avatarUrl,
+          },
+        });
+      } catch (error) {
+        console.error("[webhook] Ask AI failed:", error);
+      }
+    });
   }
 
   return NextResponse.json({ status: "ok" });
